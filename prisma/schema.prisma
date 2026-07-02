@@ -1,0 +1,199 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// AI Mock Interview Platform — Data model (Phase 2)
+//
+// Design notes:
+//  • The relational spine is User → Interview → (turns / evaluations / topics)
+//    → InterviewReport. Everything an interviewer says or scores is persisted so
+//    reports can cite *evidence*, never arbitrary numbers.
+//  • Interview.state is a JSON snapshot of the live state machine so a refresh or
+//    reconnect resumes exactly where it left off.
+//  • ResumeChunk.embedding is a pgvector column (384-dim, BAAI/bge-small-en-v1.5)
+//    enabling semantic recall of resume content during the interview.
+// ─────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  resumes    Resume[]
+  interviews Interview[]
+
+  @@map("users")
+}
+
+model Resume {
+  id        String   @id @default(cuid())
+  userId    String
+  fileName  String
+  fileType  String // "pdf" | "docx" | "txt"
+  rawText   String   @db.Text
+  analysis  Json // structured ResumeAnalysis (see src/types)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chunks     ResumeChunk[]
+  interviews Interview[]
+
+  @@index([userId])
+  @@map("resumes")
+}
+
+model ResumeChunk {
+  id        String                      @id @default(cuid())
+  resumeId  String
+  content   String                      @db.Text
+  embedding Unsupported("vector(384)")?
+  createdAt DateTime                    @default(now())
+
+  resume Resume @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+
+  @@index([resumeId])
+  @@map("resume_chunks")
+}
+
+enum InterviewType {
+  SOFTWARE_ENGINEER
+  FRONTEND_ENGINEER
+  DATA_ENGINEER
+  SITE_RELIABILITY_ENGINEER
+}
+
+enum InterviewStatus {
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}
+
+model Interview {
+  id          String          @id @default(cuid())
+  userId      String
+  resumeId    String?
+  type        InterviewType   @default(SOFTWARE_ENGINEER)
+  status      InterviewStatus @default(IN_PROGRESS)
+  difficulty  Int             @default(3) // 1..5, adapts in real time
+  state       Json // live InterviewState snapshot (topics, scores, memory)
+  startedAt   DateTime        @default(now())
+  endedAt     DateTime?
+  durationSec Int?
+
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resume        Resume?            @relation(fields: [resumeId], references: [id], onDelete: SetNull)
+  turns         ConversationTurn[]
+  evaluations   Evaluation[]
+  topicProgress TopicProgress[]
+  report        InterviewReport?
+
+  @@index([userId])
+  @@index([status])
+  @@map("interviews")
+}
+
+enum TurnRole {
+  INTERVIEWER
+  CANDIDATE
+  SYSTEM
+}
+
+model ConversationTurn {
+  id          String   @id @default(cuid())
+  interviewId String
+  index       Int // 0-based order within the interview
+  role        TurnRole
+  content     String   @db.Text
+  topic       String?
+  latencyMs   Int? // engine round-trip time for interviewer turns
+  createdAt   DateTime @default(now())
+
+  interview  Interview   @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  evaluation Evaluation?
+
+  @@unique([interviewId, index])
+  @@index([interviewId])
+  @@map("conversation_turns")
+}
+
+model Evaluation {
+  id            String   @id @default(cuid())
+  interviewId   String
+  turnId        String   @unique // the candidate turn this evaluates
+  topic         String?
+  correctness   Float // 0..10
+  depth         Float // 0..10
+  confidence    Float // 0..10
+  communication Float // 0..10
+  technical     Float // 0..10
+  strengths     String[]
+  weaknesses    String[]
+  raw           Json // full evaluator output incl. evidence quotes
+  createdAt     DateTime @default(now())
+
+  interview Interview        @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  turn      ConversationTurn @relation(fields: [turnId], references: [id], onDelete: Cascade)
+
+  @@index([interviewId])
+  @@map("evaluations")
+}
+
+enum TopicStatus {
+  PENDING
+  ACTIVE
+  COVERED
+  SKIPPED
+}
+
+model TopicProgress {
+  id             String      @id @default(cuid())
+  interviewId    String
+  topic          String
+  status         TopicStatus @default(PENDING)
+  questionsAsked Int         @default(0)
+  avgScore       Float?
+  strong         Boolean     @default(false)
+
+  interview Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+
+  @@unique([interviewId, topic])
+  @@index([interviewId])
+  @@map("topic_progress")
+}
+
+model InterviewReport {
+  id                  String   @id @default(cuid())
+  interviewId         String   @unique
+  overallScore        Float
+  technicalScore      Float
+  communicationScore  Float
+  confidenceScore     Float
+  problemSolvingScore Float
+  behaviorScore       Float
+  strengths           Json // string[]
+  weaknesses          Json // string[]
+  recommendations     Json // string[]
+  learningResources   Json // { title, url, why }[]
+  topicBreakdown      Json // { topic, score, evidence[] }[]
+  timeline            Json // { t, event, detail }[]
+  evidence            Json // { dimension, score, quotes[] }[]
+  summary             String   @db.Text
+  shareToken          String?  @unique
+  createdAt           DateTime @default(now())
+
+  interview Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+
+  @@map("interview_reports")
+}
