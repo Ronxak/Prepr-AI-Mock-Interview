@@ -76,87 +76,28 @@ export function useVoiceInterview(params: {
     setTurns((t) => [...t, { role: "candidate", content: answer || "(no answer)" }]);
 
     try {
-      const res = await fetch("/api/voice/stream", {
+      // Advance the interview and speak the next question in full before we start
+      // listening again — the same reliable path the first question uses. (The
+      // earlier /api/voice/stream binary path could drop audio when frames split
+      // across read boundaries, so questions after the first went unspoken.)
+      const res = await apiFetch<SubmitResult>("/api/interview/turn", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ interviewId: params.interviewId, transcript: answer }),
       });
-      
-      if (!res.ok) {
-        // Fallback to non-streaming if stream is unavailable (e.g., no Cartesia)
-        if (res.status === 400 || res.status === 404) {
-          const fb = await apiFetch<SubmitResult>("/api/interview/turn", {
-            method: "POST",
-            body: JSON.stringify({ interviewId: params.interviewId, transcript: answer }),
-          });
-          setCurrentQuestion(fb.question);
-          setTopic(fb.topic);
-          setTurns((t) => [...t, { role: "interviewer", content: fb.question }]);
-          await speak(fb.question);
-          if (fb.ended) {
-            setPhase("ended");
-            window.setTimeout(() => router.push(`/report/${params.interviewId}`), 1500);
-          } else {
-            await beginListening();
-          }
-          return;
-        }
-        throw new Error(await res.text());
+
+      setCurrentQuestion(res.question);
+      setTopic(res.topic);
+      setTurns((t) => [...t, { role: "interviewer", content: res.question }]);
+
+      // Read the question out loud, then hand the mic back to the candidate.
+      await speak(res.question);
+
+      if (res.ended) {
+        setPhase("ended");
+        window.setTimeout(() => router.push(`/report/${params.interviewId}`), 1500);
+      } else {
+        await beginListening();
       }
-      
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No response body");
-      
-      setPhase("speaking");
-      const player = tts.createStreamPlayer();
-      let fullText = "";
-      
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (!value || value.length < 5) continue;
-        
-        let offset = 0;
-        while (offset < value.length) {
-          if (offset + 5 > value.length) break;
-          const type = value[offset];
-          const len = new DataView(value.buffer).getUint32(value.byteOffset + offset + 1, false);
-          
-          if (offset + 5 + len > value.length) {
-            // In a real robust implementation, we would buffer partial frames.
-            // For simplicity, we assume small chunks from standard APIs don't split headers across boundaries too badly.
-            break;
-          }
-          
-          const payload = value.slice(offset + 5, offset + 5 + len);
-          offset += 5 + len;
-          
-          if (type === 0) {
-            // Text chunk
-            const textChunk = new TextDecoder().decode(payload);
-            fullText += textChunk;
-            setCurrentQuestion(fullText);
-          } else if (type === 1) {
-            // Audio chunk
-            player.playChunk(payload);
-          } else if (type === 2) {
-            // Metadata JSON
-            const metaJson = new TextDecoder().decode(payload);
-            const meta = JSON.parse(metaJson) as SubmitResult;
-            setTopic(meta.topic);
-            setTurns((t) => [...t, { role: "interviewer", content: meta.question }]);
-            await player.waitToEnd();
-            if (meta.ended) {
-              setPhase("ended");
-              window.setTimeout(() => router.push(`/report/${params.interviewId}`), 1500);
-            } else {
-              await beginListening();
-            }
-            return;
-          }
-        }
-      }
-      
     } catch (err) {
       setError(
         err instanceof ApiClientError
