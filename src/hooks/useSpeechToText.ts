@@ -41,8 +41,10 @@ export function useSpeechToText() {
           setError("Microphone access was blocked. Enable it and try again.");
         } else if (e === "unsupported") {
           setError("Speech recognition isn't supported in this browser.");
+        } else if (e === "deepgram-dropped") {
+          setError("Voice connection dropped — tap Restart microphone.");
         } else {
-          setError(e);
+          setError("Speech recognition hit a snag — tap Restart microphone.");
         }
       },
       onOpen: () => {
@@ -72,7 +74,10 @@ export function useSpeechToText() {
       return;
     }
 
-    // Prefer Deepgram when a token is available.
+    // Prefer Deepgram when a token is available. Only commit to it once the
+    // socket actually opens — if it can't connect (bad token, network, etc.)
+    // rec.start() rejects and we fall through to the browser recognizer, so the
+    // user always ends up with working speech-to-text.
     try {
       const grant = await apiFetch<{
         available: boolean;
@@ -86,16 +91,23 @@ export function useSpeechToText() {
           callbacks,
           stream
         );
-        recRef.current = rec;
-        setEngine("deepgram");
-        await rec.start();
-        setListening(true);
-        return;
+        try {
+          await rec.start();
+          recRef.current = rec;
+          setEngine("deepgram");
+          setListening(true);
+          return;
+        } catch {
+          rec.destroy();
+          /* fall through to browser */
+        }
       }
     } catch {
-      /* fall through to browser */
+      /* token fetch failed — fall through to browser */
     }
 
+    // Browser fallback. Clear any transient error from the Deepgram attempt.
+    setError(null);
     if (isBrowserSttSupported()) {
       const rec = createBrowserRecognizer(callbacks);
       recRef.current = rec;
