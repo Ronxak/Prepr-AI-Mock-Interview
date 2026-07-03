@@ -6,8 +6,6 @@
 
 Not a chatbot. Not a question bank. A reasoning engine that evaluates before it speaks.
 
-### ▶ [Live Demo](https://prepr-ai-mock-interview.onrender.com)
-
 <sub>Hosted on a free instance that sleeps when idle — the first load can take ~30–60s to wake. Everything after is instant.</sub>
 
 <br/>
