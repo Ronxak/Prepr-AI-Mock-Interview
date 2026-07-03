@@ -1,0 +1,54 @@
+# Render Blueprint — persistent Node web service for the Next.js app.
+# Runs `next start` as a long-lived process (not serverless), so the fastembed
+# / onnxruntime native runtime loads once and resume vector search works fully.
+#
+# Reuses the existing Neon Postgres (pgvector) — set DATABASE_URL / DIRECT_URL
+# to the Neon pooled / direct connection strings.
+#
+# NOTE: build uses `--include=dev` because Render sets NODE_ENV=production, and
+# a plain `npm install` would then skip devDependencies (typescript, next,
+# tailwind, prisma), breaking the build.
+services:
+  - type: web
+    name: prepr-ai-mock-interview
+    runtime: node
+    plan: free
+    region: ohio
+    branch: main
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm run start
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: EMBEDDING_CACHE_DIR
+        value: ./local_cache
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: GROQ_MODEL_QUALITY
+        value: llama-3.3-70b-versatile
+      - key: GROQ_MODEL_FAST
+        value: llama-3.1-8b-instant
+      - key: DEEPGRAM_MODEL
+        value: nova-2
+      - key: CARTESIA_MODEL
+        value: sonic-2
+      - key: CARTESIA_VOICE_ID
+        value: 62ae83ad-4f6a-430b-af41-a9bede9286ca
+      # Secrets / instance-specific — set on first deploy (sync:false = prompted,
+      # never committed). APP_URL is the service's own https URL once known.
+      - key: APP_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: DEEPGRAM_API_KEY
+        sync: false
+      - key: CARTESIA_API_KEY
+        sync: false
