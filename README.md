@@ -29,6 +29,22 @@ Not a chatbot. Not a question bank. A reasoning engine that evaluates before it 
 
 ---
 
+## Demo
+
+Watch the full demo of the **Prepr** in action.
+
+<p align="center">
+  <a href="https://vimeo.com/1206815065?share=copy&fl=sv&fe=ci">
+    <img src="docs/IMG_6664.jpg" alt="Prepr-AI Mock Interview Demo" width="900">
+  </a>
+</p>
+
+<p align="center">
+  <strong>▶ Click the image above to watch the full demo on Vimeo.</strong>
+</p>
+
+---
+
 ## Overview
 
 Prepr is a full-stack, production-grade platform that runs realistic technical
