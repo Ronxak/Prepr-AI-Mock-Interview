@@ -11,6 +11,12 @@ const nextConfig: NextConfig = {
     "mammoth",
     "@deepgram/sdk",
   ],
+  // onnxruntime-node's libonnxruntime.so.1 is loaded dynamically at runtime
+  // (not via a static require Next.js's file tracer can see), so on Vercel
+  // it gets silently dropped from the serverless bundle without this.
+  outputFileTracingIncludes: {
+    "/api/**/*": ["./node_modules/onnxruntime-node/bin/napi-v3/linux/**/*"],
+  },
   typescript: {
     ignoreBuildErrors: false,
   },
