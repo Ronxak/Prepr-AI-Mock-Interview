@@ -74,16 +74,27 @@ export function useSpeechToText() {
       return;
     }
 
-    // Prefer Deepgram when a token is available. Only commit to it once the
-    // socket actually opens — if it can't connect (bad token, network, etc.)
-    // rec.start() rejects and we fall through to the browser recognizer, so the
-    // user always ends up with working speech-to-text.
+    // Deepgram streaming needs MediaRecorder-encoded webm/opus audio, which only
+    // Chromium browsers produce — Safari and Firefox can't, so their MediaRecorder
+    // would open the socket but never send decodable audio. Gate on that support
+    // and let those browsers use the native SpeechRecognition fallback instead.
+    const canStreamToDeepgram =
+      typeof MediaRecorder !== "undefined" &&
+      (MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ||
+        MediaRecorder.isTypeSupported("audio/webm"));
+
+    // Prefer Deepgram when supported and a token is available. Only commit to it
+    // once the socket actually opens — if it can't connect or the recorder can't
+    // start, rec.start() rejects and we fall through to the browser recognizer,
+    // so the user always ends up with working speech-to-text.
     try {
-      const grant = await apiFetch<{
-        available: boolean;
-        token?: string;
-        model?: string;
-      }>("/api/voice/token");
+      const grant = canStreamToDeepgram
+        ? await apiFetch<{
+            available: boolean;
+            token?: string;
+            model?: string;
+          }>("/api/voice/token")
+        : { available: false as const };
       if (grant.available && grant.token) {
         const rec = await createDeepgramRecognizer(
           grant.token,

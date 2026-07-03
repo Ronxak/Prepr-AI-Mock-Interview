@@ -74,14 +74,23 @@ export async function createDeepgramRecognizer(
       }, CONNECT_TIMEOUT_MS);
 
       ws.onopen = () => {
-        opened = true;
         clearTimeout(timer);
-        cb.onOpen?.();
+        // If the mic recorder can't start (e.g. a browser that can't encode
+        // webm/opus), reject so the caller falls back to the browser recognizer
+        // instead of committing to a socket that will never receive audio.
         try {
           startRecorder();
         } catch {
-          cb.onError("recorder-failed");
+          try {
+            ws?.close();
+          } catch {
+            /* noop */
+          }
+          reject(new Error("recorder-unsupported"));
+          return;
         }
+        opened = true;
+        cb.onOpen?.();
         resolve();
       };
 
